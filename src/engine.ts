@@ -16,8 +16,6 @@ import type {
 
 const MAX_QUERY_TERMS = 32;
 const MAX_LIMIT = 50;
-/** Sealed rows are ranked here, so this many of the newest candidates are read per scope. */
-const SEALED_CANDIDATES = 200;
 const TABLE = `${SCHEMA}.memories`;
 
 interface Row extends Record<string, unknown> {
@@ -212,13 +210,14 @@ export function createMemoryEngine(query: Query, options: { sealer?: MemorySeale
       if (all.length === 0) continue;
       const params: unknown[] = [all];
       const filter = namespaceFilter(namespaces, params);
-      params.push(SEALED_CANDIDATES);
+      params.push(Math.min(Math.max(Math.trunc(request.limit), 1), MAX_LIMIT));
       const { rows } = await query(
         `SELECT id, kind, owner_id, generation, space_id, content, sealed, origin, updated_at,
                 search_tokens
          FROM ${TABLE}
          WHERE sealed AND search_tokens && $1::integer[] AND ${filter}
-         ORDER BY updated_at DESC
+         ORDER BY cardinality(ARRAY(SELECT unnest(search_tokens) INTERSECT SELECT unnest($1::integer[]))) DESC,
+                  updated_at DESC
          LIMIT $${params.length}`,
         params,
       );

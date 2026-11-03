@@ -106,6 +106,21 @@ describe("sealed memory", () => {
     expect(found.map((memory) => memory.content)).toEqual(["kiwi smoothie recipe", "kiwi only"]);
   });
 
+  it("finds a strong match older than many newer weak matches", async () => {
+    const engine = sealedEngine();
+    await engine.save({ namespace: bot("b1"), spaceId: "s1", content: "kiwi smoothie recipe" });
+    for (let i = 0; i < 250; i++)
+      await engine.save({ namespace: bot("b1"), spaceId: "s1", content: `kiwi note ${i}` });
+
+    const found = await engine.recall({
+      namespaces: [bot("b1")],
+      spaceId: "s1",
+      query: "kiwi smoothie",
+      limit: 1,
+    });
+    expect(found.map((memory) => memory.content)).toEqual(["kiwi smoothie recipe"]);
+  });
+
   it("recalls plaintext rows from before sealing next to sealed ones", async () => {
     await createMemoryEngine(run).save({
       namespace: bot("b1"),
