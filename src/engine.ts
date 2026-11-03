@@ -262,13 +262,20 @@ export function createMemoryEngine(query: Query, options: { sealer?: MemorySeale
     ]
       .sort((a, b) => b.score - a.score || b.updatedAt.localeCompare(a.updatedAt))
       .slice(0, limit);
-    return Promise.all(
-      ranked.map(async (entry) =>
-        "memory" in entry
-          ? { ...entry.memory, score: entry.score }
-          : { ...toMemory(entry.row, await contentOf(entry.row)), score: entry.score },
-      ),
+    const opened = await Promise.all(
+      ranked.map(async (entry): Promise<RecalledMemory | null> => {
+        if ("memory" in entry) return { ...entry.memory, score: entry.score };
+        try {
+          return { ...toMemory(entry.row, await contentOf(entry.row)), score: entry.score };
+        } catch {
+          console.warn(
+            `Skipping unreadable sealed memory ${entry.row.id} (${entry.row.kind}, scope ${scopeOf(entry.row.kind, entry.row.owner_id, entry.row.space_id)})`,
+          );
+          return null;
+        }
+      }),
     );
+    return opened.filter((memory) => memory !== null);
   }
 
   async function forget(request: ForgetRequest): Promise<boolean> {

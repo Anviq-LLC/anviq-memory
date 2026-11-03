@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryEngine } from "./engine.js";
 import type { MemorySealer, Namespace, Query } from "./types.js";
 
@@ -183,19 +183,33 @@ describe("sealed memory", () => {
     expect(found.map((memory) => memory.content).sort()).toEqual(["Plain olives", "Sealed olives"]);
   });
 
-  it("refuses a sealed value moved to another row", async () => {
+  it("skips a sealed value moved to another row and recalls the rest", async () => {
     const engine = sealedEngine();
     await engine.save({ namespace: bot("b1"), spaceId: "s1", content: "First secret" });
-    await engine.save({ namespace: bot("b1"), spaceId: "s1", content: "Second secret" });
+    const second = await engine.save({
+      namespace: bot("b1"),
+      spaceId: "s1",
+      content: "Second secret",
+    });
     await db.query(
       `UPDATE anviq_memory.memories SET content = (
          SELECT content FROM anviq_memory.memories ORDER BY created_at, id LIMIT 1)
        WHERE content LIKE '%${Buffer.from("Second secret").toString("base64")}'`,
     );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    await expect(
-      engine.recall({ namespaces: [bot("b1")], spaceId: "s1", query: "secret", limit: 5 }),
-    ).rejects.toThrow("another row");
+    const found = await engine.recall({
+      namespaces: [bot("b1")],
+      spaceId: "s1",
+      query: "secret",
+      limit: 5,
+    });
+    expect(found.map((memory) => memory.content)).toEqual(["First secret"]);
+    expect(warn).toHaveBeenCalledOnce();
+    const logged = JSON.stringify(warn.mock.calls);
+    expect(logged).toContain(second.id);
+    expect(logged).not.toContain("secret");
+    warn.mockRestore();
   });
 
   it("needs the space to recall bot memory when sealing is configured", async () => {
