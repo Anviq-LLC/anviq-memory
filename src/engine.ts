@@ -16,6 +16,7 @@ import type {
 
 const MAX_QUERY_TERMS = 32;
 const MAX_LIMIT = 50;
+const RRF_K = 60;
 const TABLE = `${SCHEMA}.memories`;
 
 interface Row extends Record<string, unknown> {
@@ -240,10 +241,21 @@ export function createMemoryEngine(query: Query, options: { sealer?: MemorySeale
       recallPlain(terms, request.namespaces, limit),
       recallSealed(request),
     ]);
+    // The two lists use different score scales, so they are merged by rank, not by score.
+    const fused = (rank: number) => RRF_K / (RRF_K + rank + 1);
+    const sealedRanked = [...sealed].sort(
+      (a, b) =>
+        b.score - a.score ||
+        new Date(b.row.updated_at).getTime() - new Date(a.row.updated_at).getTime(),
+    );
     const ranked = [
-      ...plain.map((memory) => ({ score: memory.score, updatedAt: memory.updatedAt, memory })),
-      ...sealed.map(({ row, score }) => ({
-        score,
+      ...plain.map((memory, index) => ({
+        score: fused(index),
+        updatedAt: memory.updatedAt,
+        memory,
+      })),
+      ...sealedRanked.map(({ row }, index) => ({
+        score: fused(index),
         updatedAt: new Date(row.updated_at).toISOString(),
         row,
       })),
@@ -253,7 +265,7 @@ export function createMemoryEngine(query: Query, options: { sealer?: MemorySeale
     return Promise.all(
       ranked.map(async (entry) =>
         "memory" in entry
-          ? entry.memory
+          ? { ...entry.memory, score: entry.score }
           : { ...toMemory(entry.row, await contentOf(entry.row)), score: entry.score },
       ),
     );

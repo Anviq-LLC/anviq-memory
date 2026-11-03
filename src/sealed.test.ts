@@ -121,6 +121,25 @@ describe("sealed memory", () => {
     expect(found.map((memory) => memory.content)).toEqual(["kiwi smoothie recipe"]);
   });
 
+  it("does not let sealed rows crowd out plaintext ones", async () => {
+    const engine = sealedEngine();
+    await engine.save({ namespace: bot("b1"), spaceId: "s1", content: "Sealed note about figs" });
+    await engine.save({ namespace: bot("b1"), spaceId: "s1", content: "Another sealed figs note" });
+    await createMemoryEngine(run).save({
+      namespace: bot("b1"),
+      spaceId: "s1",
+      content: "Plain figs note",
+    });
+
+    const found = await engine.recall({
+      namespaces: [bot("b1")],
+      spaceId: "s1",
+      query: "figs",
+      limit: 2,
+    });
+    expect(found.map((memory) => memory.content)).toContain("Plain figs note");
+  });
+
   it("recalls plaintext rows from before sealing next to sealed ones", async () => {
     await createMemoryEngine(run).save({
       namespace: bot("b1"),
